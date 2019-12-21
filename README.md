@@ -1,5 +1,5 @@
 # ZUploader
- 使用自己开发的网络框架[ZHttp]()实现的文件上传框架（完善中）
+ 使用自己开发的网络框架[ZHttp](https://github.com/Z-P-J/ZHttp)实现的文件上传框架（完善中）
 
 ## 使用
 ```java
