@@ -59,3 +59,6 @@ ZUploader.with(path)
                 })
                 .start();
 ```
+
+## 混淆（如果您的项目使用了代码混淆，请一定添加以下规则至您的项目）
+[混淆规则](https://github.com/Z-P-J/ZUploader/blob/master/app/proguard-rules.pro)
