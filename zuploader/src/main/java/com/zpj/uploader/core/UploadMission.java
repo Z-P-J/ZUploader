@@ -10,6 +10,7 @@ import android.widget.Toast;
 
 import com.google.gson.Gson;
 import com.zpj.uploader.config.UploadMissionConfig;
+import com.zpj.uploader.constant.Error;
 import com.zpj.uploader.constant.ErrorCode;
 import com.zpj.uploader.util.FileUtil;
 import com.zpj.uploader.util.ThreadPoolFactory;
@@ -49,7 +50,7 @@ public class UploadMission {
 
         void onFinish();
 
-        void onError(int errCode);
+        void onError(Error errCode);
     }
 
     public enum MissionStatus {
@@ -79,6 +80,7 @@ public class UploadMission {
     private String url = "";
     private String filePath;
     private long createTime = 0;
+    private long finishTime = 0;
     private int notifyId = 0;
     private long totalBytes = 0;
     private long uploadedBytes = 0;
@@ -92,21 +94,24 @@ public class UploadMission {
 
     private transient final int threadCount = 1;
 
-    private transient ArrayList<WeakReference<MissionListener>> mListeners = new ArrayList<>();
+    private transient final ArrayList<WeakReference<MissionListener>> mListeners = new ArrayList<>();
 
     private transient boolean mWritingToFile = false;
 
-    private transient ThreadPoolExecutor threadPoolExecutor;
+    protected transient ThreadPoolExecutor threadPoolExecutor;
 
     private transient long lastDone = -1;
     private transient String tempSpeed = "0 KB/s";
     private transient final UpdateInfo updateInfo = new UpdateInfo();
-    private transient final Handler handler = new Handler(Looper.getMainLooper());
+    protected transient final Handler handler = new Handler(Looper.getMainLooper());
 
 
     //------------------------------------------------------runnables---------------------------------------------
 
     private final transient Runnable progressRunnable = new Runnable() {
+
+        private long lastTime = -1;
+
         @Override
         public void run() {
             Log.d(TAG, "progressRunnable--start");
@@ -117,10 +122,18 @@ public class UploadMission {
             handler.postDelayed(progressRunnable, uploadMissionConfig.getProgressInterval());
             long downloaded = uploadedBytes;
             long delta = downloaded - lastDone;
+            float deltaTime;
+            long currentTime = System.currentTimeMillis();
+            if (lastTime <= 0) {
+                deltaTime = uploadMissionConfig.getProgressInterval() / 1000f;
+            } else {
+                deltaTime = currentTime - lastTime;
+            }
+            lastTime = currentTime;
             Log.d(TAG, "progressRunnable--delta=" + delta);
             if (delta > 0) {
                 lastDone = downloaded;
-                float speed = delta * (uploadMissionConfig.getProgressInterval() / 1000f);
+                float speed = delta / deltaTime;// delta * (uploadMissionConfig.getProgressInterval() / 1000f)
                 tempSpeed = Utility.formatSpeed(speed);
             }
             String downloadedSizeStr = Utility.formatSize(downloaded);
@@ -158,22 +171,34 @@ public class UploadMission {
         }
     };
 
-    private UploadMission() {
-
+    protected UploadMission() {
+        Log.d(TAG, "UploadMissionUploadMission");
     }
 
-    public static UploadMission create(String url, File file, UploadMissionConfig config) {
-        UploadMission mission = new UploadMission();
-        mission.url = url;
-        mission.fileName = file.getName();
-        mission.filePath = file.getAbsolutePath();
-        mission.totalBytes = file.length();
-        mission.uuid = UUID.randomUUID().toString();
-        mission.createTime = System.currentTimeMillis();
-        mission.missionStatus = MissionStatus.INITING;
-        mission.uploadMissionConfig = config;
-        return mission;
+    public UploadMission(String url, File file, UploadMissionConfig config) {
+        this();
+        this.url = url;
+        this.fileName = file.getName();
+        this.filePath = file.getAbsolutePath();
+        this.totalBytes = file.length();
+        this.uuid = UUID.randomUUID().toString();
+        this.createTime = System.currentTimeMillis();
+        this.missionStatus = MissionStatus.INITING;
+        this.uploadMissionConfig = config;
     }
+
+//    public static UploadMission create(String url, File file, UploadMissionConfig config) {
+//        UploadMission mission = new UploadMission();
+//        mission.url = url;
+//        mission.fileName = file.getName();
+//        mission.filePath = file.getAbsolutePath();
+//        mission.totalBytes = file.length();
+//        mission.uuid = UUID.randomUUID().toString();
+//        mission.createTime = System.currentTimeMillis();
+//        mission.missionStatus = MissionStatus.INITING;
+//        mission.uploadMissionConfig = config;
+//        return mission;
+//    }
 
     //-------------------------下载任务状态-----------------------------------
     public boolean isIniting() {
@@ -210,18 +235,32 @@ public class UploadMission {
 
 
     //----------------------------------------------------------operation------------------------------------------------------------
-    void init() {
-        currentRetryCount = uploadMissionConfig.getRetryCount();
-        lastDone = uploadedBytes;
-        uploadMissionConfig.getThreadPoolConfig().setCorePoolSize(2);
-        uploadMissionConfig.getThreadPoolConfig().setMaximumPoolSize(4);
-        if (threadPoolExecutor == null) {
-            threadPoolExecutor = ThreadPoolFactory.newFixedThreadPool(uploadMissionConfig.getThreadPoolConfig());
+    protected void init() {
+        Log.d("writeMissionInfo(", "threadPoolExecutor1=" + threadPoolExecutor);
+        if (!UploadManagerImpl.getInstance().getMissions().contains(this)) {
+            UploadManagerImpl.getInstance().insertMission(this);
+            if (isFinished()) {
+                if (finishTime == 0) {
+                    finishTime = System.currentTimeMillis();
+                    writeMissionInfo();
+                }
+                return;
+            }
+            currentRetryCount = uploadMissionConfig.getRetryCount();
+            lastDone = uploadedBytes;
+            uploadMissionConfig.getThreadPoolConfig().setCorePoolSize(2);
+            uploadMissionConfig.getThreadPoolConfig().setMaximumPoolSize(4);
+            Log.d("writeMissionInfo(", "threadPoolExecutor2=" + threadPoolExecutor);
+            if (threadPoolExecutor == null) {
+                threadPoolExecutor = ThreadPoolFactory.newFixedThreadPool(uploadMissionConfig.getThreadPoolConfig());
+            }
+            writeMissionInfo();
+            notifyStatus(MissionStatus.INITING);
         }
-        writeMissionInfo();
     }
 
     public void start() {
+        init();
         if (!isRunning() && !isFinished()) {
             errCode = -1;
             initCurrentRetryCount();
@@ -286,7 +325,7 @@ public class UploadMission {
     }
 
     //------------------------------------------------------------notify------------------------------------------------------------
-    synchronized void notifyProgress(long deltaLen) {
+    protected synchronized void notifyProgress(long deltaLen) {
         uploadedBytes += deltaLen;
         Log.d(TAG, "uploadedBytes=" + uploadedBytes + "   deltaLen" + deltaLen);
         if (uploadedBytes > totalBytes) {
@@ -294,7 +333,7 @@ public class UploadMission {
         }
     }
 
-    synchronized void notifyFinished() {
+    protected synchronized void notifyFinished() {
         Log.d(TAG, "notifyFinished errCode=" + errCode + " uploadedBytes=" + uploadedBytes + " totalBytes=" + totalBytes);
         if (errCode > 0) {
             return;
@@ -308,9 +347,9 @@ public class UploadMission {
         }
     }
 
-    synchronized void notifyError(int err) {
-        Log.d(TAG, "err=" +err);
-        if (!(err == ErrorCode.ERROR_WITHOUT_STORAGE_PERMISSIONS || err == ErrorCode.ERROR_FILE_NOT_FOUND)) {
+    protected synchronized void notifyError(Error err) {
+        Log.d(TAG, "err=" + err);
+        if (err.canRetry()) {
             currentRetryCount--;
             if (currentRetryCount >= 0) {
                 pause();
@@ -329,13 +368,14 @@ public class UploadMission {
 
         currentRetryCount = uploadMissionConfig.getRetryCount();
 
-        errCode = err;
+        errCode = 1;
 
         Log.d("eeeeeeeeeeeeeeeeeeee", "error:" + errCode);
 
         writeMissionInfo();
 
-        notifyStatus(missionStatus);
+//        notifyStatus(missionStatus);
+        onError(err);
 
         UploadManagerImpl.decreaseDownloadingCount();
 
@@ -345,6 +385,20 @@ public class UploadMission {
                     .setContentTitle("下载出错" + errCode + ":" + fileName)
                     .setId(getNotifyId())
                     .show();
+        }
+    }
+
+    private void onError(final Error e) {
+        for (WeakReference<MissionListener> ref : mListeners) {
+            final MissionListener listener = ref.get();
+            if (listener != null) {
+                MissionListener.HANDLER_STORE.get(listener).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        listener.onError(e);
+                    }
+                });
+            }
         }
     }
 
@@ -371,9 +425,9 @@ public class UploadMission {
                             case PAUSE:
                                 listener.onPause();
                                 break;
-                            case ERROR:
-                                listener.onError(errCode);
-                                break;
+//                            case ERROR:
+//                                listener.onError(errCode);
+//                                break;
                             case RETRY:
                                 listener.onRetry();
                                 break;
@@ -405,6 +459,7 @@ public class UploadMission {
         handler.removeCallbacks(progressRunnable);
 
         missionStatus = MissionStatus.FINISHED;
+        finishTime = System.currentTimeMillis();
 
         writeMissionInfo();
 
@@ -423,6 +478,8 @@ public class UploadMission {
         if (UploadManagerImpl.getInstance().getDownloadManagerListener() != null) {
             UploadManagerImpl.getInstance().getDownloadManagerListener().onMissionFinished();
         }
+        threadPoolExecutor.shutdown();
+        threadPoolExecutor = null;
     }
 
     public synchronized void addListener(MissionListener listener) {
@@ -431,6 +488,7 @@ public class UploadMission {
         }
         Handler handler = new Handler(Looper.getMainLooper());
         MissionListener.HANDLER_STORE.put(listener, handler);
+        Log.d(TAG, "mListeners=" + mListeners);
         mListeners.add(new WeakReference<>(listener));
     }
 
@@ -450,15 +508,18 @@ public class UploadMission {
             WeakReference<MissionListener> weakRef = iterator.next();
             iterator.remove();
         }
+        mListeners.clear();
     }
 
-    public void writeMissionInfo() {
+    protected void writeMissionInfo() {
         Log.d(TAG, "writeMissionInfo mWritingToFile=" + mWritingToFile);
         if (!mWritingToFile) {
             mWritingToFile = true;
+            Log.d("writeMissionInfo(", "threadPoolExecutor3=" + threadPoolExecutor);
             if (threadPoolExecutor == null) {
                 threadPoolExecutor = ThreadPoolFactory.newFixedThreadPool(uploadMissionConfig.getThreadPoolConfig());
             }
+            Log.d("writeMissionInfo(", "threadPoolExecutor4=" + threadPoolExecutor);
             threadPoolExecutor.submit(writeMissionInfoRunnable);
         }
     }
@@ -477,7 +538,7 @@ public class UploadMission {
     }
 
     //--------------------------------------------------------------getter-----------------------------------------------
-    private Context getContext() {
+    protected Context getContext() {
         return UploadManagerImpl.getInstance().getContext();
     }
 
@@ -577,7 +638,7 @@ public class UploadMission {
         return uploadMissionConfig.getConnectOutTime() * 10;
     }
 
-    Map<String, String> getHeaders() {
+    public Map<String, String> getHeaders() {
         return uploadMissionConfig.getHeaders();
     }
 
@@ -599,6 +660,10 @@ public class UploadMission {
         return String.format(Locale.US, "%.2f%%", getProgress());
     }
 
+    public long getFileSize() {
+        return totalBytes;
+    }
+
     public String getFileSizeStr() {
         return Utility.formatSize(totalBytes);
     }
@@ -611,7 +676,7 @@ public class UploadMission {
         return tempSpeed;
     }
 
-    private int getNotifyId() {
+    protected int getNotifyId() {
         if (notifyId == 0) {
             notifyId = (int) (createTime / 10000) + (int) (createTime % 10000) * 100000;
         }
@@ -630,7 +695,7 @@ public class UploadMission {
         this.fileName = fileName;
     }
 
-    void setUrl(String url) {
+    protected void setUrl(String url) {
         this.url = url;
     }
 

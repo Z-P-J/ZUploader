@@ -12,6 +12,8 @@ import android.os.Message;
 import android.os.PowerManager;
 import android.util.Log;
 
+import com.zpj.uploader.constant.Error;
+
 public class UploadService extends Service implements UploadMission.MissionListener {
 
     private static final String TAG = UploadService.class.getSimpleName();
@@ -145,7 +147,7 @@ public class UploadService extends Service implements UploadMission.MissionListe
     }
 
     @Override
-    public void onError(int errCode) {
+    public void onError(Error errCode) {
         postUpdateMessage();
     }
 

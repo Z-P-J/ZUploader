@@ -1,6 +1,7 @@
 package com.zpj.uploader.core;
 
 import android.content.Context;
+import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -41,6 +42,8 @@ public class UploadManagerImpl implements UploadManager {
 
 	private static AtomicInteger downloadingCount = new AtomicInteger(0);
 
+	private boolean onLoaded = false;
+
 	private UploadManagerImpl(Context context, UploaderConfig options) {
 		mContext = context;
 		this.options = options;
@@ -59,10 +62,10 @@ public class UploadManagerImpl implements UploadManager {
 		return mManager;
 	}
 
-	public static void register(UploaderConfig options) {
+	public static<T extends UploadMission> void register(UploaderConfig options, Class<T> clazz) {
 		if (mManager == null) {
 			mManager = new UploadManagerImpl(options.getContext(), options);
-			mManager.loadMissions();
+			mManager.loadMissions(clazz);
 		}
 	}
 
@@ -116,49 +119,76 @@ public class UploadManagerImpl implements UploadManager {
 
 	@Override
 	public void loadMissions() {
-		long time1 = System.currentTimeMillis();
-		ALL_MISSIONS.clear();
-		File f;
-		if (TASK_PATH != null) {
-			f = new File(TASK_PATH);
-		} else {
-			f = new File(getContext().getFilesDir(), MISSIONS_PATH);
-		}
+		loadMissions(UploadMission.class);
+	}
 
-		if (f.exists() && f.isDirectory()) {
-			for (final File sub : f.listFiles()) {
-				if (sub.isDirectory()) {
-					continue;
+	@Override
+	public <T extends UploadMission> void loadMissions(final Class<T> clazz) {
+		final Handler handler = new Handler();
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				long time1 = System.currentTimeMillis();
+				ALL_MISSIONS.clear();
+				final File f;
+				if (TASK_PATH != null) {
+					f = new File(TASK_PATH);
+				} else {
+					f = new File(getContext().getFilesDir(), MISSIONS_PATH);
 				}
-				if (sub.getName().endsWith(MISSION_INFO_FILE_SUFFIX_NAME)) {
-					String str = Utility.readFromFile(sub.getAbsolutePath());
-					if (!TextUtils.isEmpty(str)) {
-						UploadMission mis = new Gson().fromJson(str, UploadMission.class);
-						Log.d("initMissions", "mis=null? " + (mis == null));
-						if (mis != null) {
-							mis.init();
-							insertMission(mis);
+				if (f.exists() && f.isDirectory()) {
+					for (final File sub : f.listFiles()) {
+						if (sub.isDirectory()) {
+							continue;
+						}
+						if (sub.getName().endsWith(MISSION_INFO_FILE_SUFFIX_NAME)) {
+							String str = Utility.readFromFile(sub.getAbsolutePath());
+							if (!TextUtils.isEmpty(str)) {
+								final UploadMission mis = new Gson().fromJson(str, clazz);
+								Log.d("initMissions", "mis=null? " + (mis == null));
+								if (mis != null) {
+									handler.post(new Runnable() {
+										@Override
+										public void run() {
+											mis.init();
+										}
+									});
+//									insertMission(mis);
+								}
+							}
 						}
 					}
+				} else {
+					f.mkdirs();
 				}
-			}
-		} else {
-			f.mkdirs();
-		}
 
-		Collections.sort(ALL_MISSIONS, new Comparator<UploadMission>() {
-			@Override
-			public int compare(UploadMission o1, UploadMission o2) {
-				return - (int) (o1.getCreateTime() - o2.getCreateTime());
+				Collections.sort(ALL_MISSIONS, new Comparator<UploadMission>() {
+					@Override
+					public int compare(UploadMission o1, UploadMission o2) {
+						return - (int) (o1.getCreateTime() - o2.getCreateTime());
+					}
+				});
+				long time2  = System.currentTimeMillis();
+				Log.d(TAG, "deltaTime=" + (time2 - time1));
+				handler.post(new Runnable() {
+					@Override
+					public void run() {
+						if (downloadManagerListener != null) {
+							downloadManagerListener.onLoadMissionFinished();
+						}
+					}
+				});
+				onLoaded = true;
 			}
-		});
-		long time2  = System.currentTimeMillis();
-		Log.d(TAG, "deltaTime=" + (time2 - time1));
+		}).start();
 	}
 
 	@Override
 	public void setDownloadManagerListener(DownloadManagerListener downloadManagerListener) {
 		this.downloadManagerListener = downloadManagerListener;
+		if (onLoaded) {
+			downloadManagerListener.onLoadMissionFinished();
+		}
 	}
 
 	@Override
@@ -173,8 +203,8 @@ public class UploadManagerImpl implements UploadManager {
 
 	@Override
 	public UploadMission addMission(String url, File file, UploadMissionConfig config) {
-		UploadMission mission = UploadMission.create(url, file, config);
-		insertMission(mission);
+		UploadMission mission = new UploadMission(url, file, config);
+//		insertMission(mission);
 		if (downloadManagerListener != null) {
 			downloadManagerListener.onMissionAdd();
 		}
@@ -317,8 +347,12 @@ public class UploadManagerImpl implements UploadManager {
 	public int getCount() {
 		return ALL_MISSIONS.size();
 	}
-	
-	private int insertMission(UploadMission mission) {
+
+	@Override
+	public int insertMission(UploadMission mission) {
+		if (ALL_MISSIONS.contains(mission)) {
+			return ALL_MISSIONS.indexOf(mission);
+		}
 		ALL_MISSIONS.add(mission);
 		return ALL_MISSIONS.size() - 1;
 	}

@@ -69,17 +69,21 @@ public class ZUploader {
 
 
     //------------------------------------------------------------static methods--------------------------------------------------------
-
-    public static void init(Context context) {
-        init(UploaderConfig.with(context));
+    public static<T extends UploadMission> void init(Context context) {
+        init(context, UploadMission.class);
     }
 
-    public static void init(final UploaderConfig options) {
+
+    public static<T extends UploadMission> void init(Context context, Class<T> clazz) {
+        init(UploaderConfig.with(context), clazz);
+    }
+
+    public static<T extends UploadMission> void init(final UploaderConfig options,  Class<T> clazz) {
         final Context context = options.getContext();
 
         SPHelper.init(context);
         NotifyUtil.init(context);
-        UploadManagerImpl.register(options);
+        UploadManagerImpl.register(options, clazz);
         IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction("android.net.conn.CONNECTIVITY_CHANGE");
         options.getContext().registerReceiver(NetworkChangeReceiver.getInstance(), intentFilter);
@@ -163,6 +167,14 @@ public class ZUploader {
             if (mission.isFinished() != downloading) {
                 uploadMissionList.add(mission);
             }
+        }
+        return uploadMissionList;
+    }
+
+    public static<T extends UploadMission> List<T> getAllMissions(Class<T> obj){
+        List<T> uploadMissionList = new ArrayList<>();
+        for (UploadMission mission : getAllMissions()) {
+            uploadMissionList.add((T) mission);
         }
         return uploadMissionList;
     }

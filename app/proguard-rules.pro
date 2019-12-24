@@ -11,10 +11,10 @@
 #-keep class com.google.gson.stream.** { *; }
 
 # Application classes that will be serialized/deserialized over Gson
--keep class com.zpj.uploader.core.UploadMission{*;}
--keep class com.zpj.uploader.core.UploadMission$* {
-        *;
- }
+-keep class com.zpj.uploader.core.UploadMission { *; }
+-keep class com.zpj.uploader.core.UploadMission$* { *; }
+-keep class * extends com.zpj.uploader.core.UploadMission { *; }
+-keep class * extends com.zpj.uploader.core.UploadMission$* { *; }
 -keep class com.zpj.uploader.config.** { <fields>; }
 
 # Prevent proguard from stripping interface information from TypeAdapter, TypeAdapterFactory,

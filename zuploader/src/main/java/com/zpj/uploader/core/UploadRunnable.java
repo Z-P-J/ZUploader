@@ -4,6 +4,7 @@ import android.util.Log;
 
 import com.zpj.http.ZHttp;
 import com.zpj.http.core.IHttp;
+import com.zpj.uploader.constant.Error;
 import com.zpj.uploader.constant.ErrorCode;
 
 import java.io.FileInputStream;
@@ -13,13 +14,11 @@ import java.nio.charset.Charset;
 public class UploadRunnable implements Runnable{
     private static final String TAG = UploadRunnable.class.getSimpleName();
 
-	private static final String END = "\r\n";
-	private static final String LAST = "--";
-	private static final Charset US_ASCII = Charset.forName("US-ASCII");
+//	private static final String END = "\r\n";
+//	private static final String LAST = "--";
+//	private static final Charset US_ASCII = Charset.forName("US-ASCII");
 
     private static final int BUFFER_SIZE = 512;
-
-    private boolean shouldContinue = true;
 
     private final UploadMission mMission;
     private int mId;
@@ -45,6 +44,11 @@ public class UploadRunnable implements Runnable{
                             Log.d(TAG, "bytesWritten=" + bytesWritten + "    time=" + System.currentTimeMillis());
                             notifyProgress(bytesWritten);
                         }
+
+                        @Override
+                        public boolean shouldContinue() {
+                            return mMission.isRunning();
+                        }
                     })
                     .header("Charset", mMission.getUploadMissionConfig().isUseUtf8() ? "UTF-8" : "US-ASCII")
                     .headers(mMission.getUploadMissionConfig().getHeaders())
@@ -52,7 +56,7 @@ public class UploadRunnable implements Runnable{
                     .execute();
         } catch (IOException e) {
             e.printStackTrace();
-            notifyError(ErrorCode.ERROR_IO);
+            notifyError(new Error(e.getMessage()));
             return;
         }
 
@@ -75,7 +79,7 @@ public class UploadRunnable implements Runnable{
 		}
     }
 
-    private void notifyError(final int err) {
+    private void notifyError(final Error err) {
         synchronized (mMission) {
             mMission.notifyError(err);
         }

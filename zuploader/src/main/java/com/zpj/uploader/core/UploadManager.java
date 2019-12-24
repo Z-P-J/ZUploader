@@ -15,6 +15,9 @@ public interface UploadManager {
     List<UploadMission> ALL_MISSIONS = new ArrayList<>();
 
     interface DownloadManagerListener {
+
+        void onLoadMissionFinished();
+
         void onMissionAdd();
 
         void onMissionDelete();
@@ -68,9 +71,13 @@ public interface UploadManager {
 
     void loadMissions();
 
+    <T extends UploadMission> void loadMissions(Class<T> clazz);
+
     void setDownloadManagerListener(DownloadManagerListener downloadManagerListener);
 
     DownloadManagerListener getDownloadManagerListener();
 
     List<UploadMission> getMissions();
+
+    int insertMission(UploadMission mission);
 }
